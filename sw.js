@@ -1,4 +1,4 @@
-const CACHE = "life-rpg-v5";
+const CACHE = "life-rpg-v52";
 const SHELL = ["./", "index.html", "app.js", "manifest.webmanifest"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));

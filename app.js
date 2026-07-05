@@ -152,7 +152,105 @@ function normalize(s) {
   return s;
 }
 const load = () => { try { const raw = localStorage.getItem(KEY); state = normalize(raw ? JSON.parse(raw) : defaultState()); } catch { state = defaultState(); } };
-const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+const save = () => { state.savedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(state)); if (syncCfg && syncCfg.gistId) syncPushSoon(); };
+
+/* ---------- SYNC GITHUB (Gist privé) ---------- */
+const APP_VERSION = "5.2.0";
+const SYNC_KEY = "life-rpg-sync";
+const SYNC_DEBOUNCE = (typeof window !== "undefined" && window.__SYNC_DEBOUNCE) || 2500;
+let syncCfg = null, syncStatus = "off", syncTimer = null, syncLast = null;
+
+function loadSyncCfg() {
+  try { syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)); } catch { syncCfg = null; }
+  if (syncCfg && syncCfg.token) syncStatus = "idle";
+}
+function saveSyncCfg() {
+  if (syncCfg) localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg));
+  else localStorage.removeItem(SYNC_KEY);
+}
+function ghFetch(url, opts = {}) {
+  return fetch("https://api.github.com" + url, { ...opts, headers: {
+    "Authorization": "Bearer " + syncCfg.token,
+    "Accept": "application/vnd.github+json",
+    ...(opts.body ? { "Content-Type": "application/json" } : {}),
+  }});
+}
+function setSyncStatus(s) {
+  syncStatus = s;
+  const el = document.getElementById("sync-dot");
+  if (el) {
+    el.textContent = s === "ok" ? "✓" : s === "syncing" ? "⟳" : s === "error" ? "⚠" : "";
+    el.style.color = s === "ok" ? "var(--green)" : s === "error" ? "var(--red)" : "var(--muted)";
+    el.title = s === "ok" ? "Synchronisé" : s === "syncing" ? "Synchronisation…" : s === "error" ? "Erreur de sync (hors ligne ou token invalide)" : "";
+  }
+}
+async function syncConnect(token) {
+  syncCfg = { token: token.trim(), gistId: null };
+  setSyncStatus("syncing");
+  try {
+    const res = await ghFetch("/gists?per_page=100");
+    if (!res.ok) throw new Error("auth");
+    const gists = await res.json();
+    const found = gists.find((g) => g.files && g.files["life-rpg.json"]);
+    if (found) {
+      syncCfg.gistId = found.id;
+      saveSyncCfg();
+      await syncPull(true); // une sauvegarde existe déjà -> on l adopte
+    } else {
+      const c = await ghFetch("/gists", { method: "POST", body: JSON.stringify({
+        description: "Life RPG — sauvegarde automatique", public: false,
+        files: { "life-rpg.json": { content: JSON.stringify(state) } } }) });
+      if (!c.ok) throw new Error("create");
+      syncCfg.gistId = (await c.json()).id;
+      saveSyncCfg();
+    }
+    setSyncStatus("ok"); syncLast = Date.now();
+    state.log.unshift({ ts: Date.now(), text: "☁ Sync GitHub connectée", xp: 0 });
+    save(); render();
+  } catch {
+    syncCfg = null; saveSyncCfg(); setSyncStatus("error");
+    alert("Connexion impossible. Vérifie le token (type classique, scope « gist » uniquement).");
+    render();
+  }
+}
+function syncDisconnect() {
+  syncCfg = null; saveSyncCfg(); setSyncStatus("off"); render();
+}
+async function syncPull(force) {
+  if (!syncCfg || !syncCfg.gistId) return;
+  try {
+    setSyncStatus("syncing");
+    const res = await ghFetch("/gists/" + syncCfg.gistId);
+    if (!res.ok) throw new Error();
+    const g = await res.json();
+    const content = g.files && g.files["life-rpg.json"] && g.files["life-rpg.json"].content;
+    if (content) {
+      const remote = JSON.parse(content);
+      if (force || (remote.savedAt || 0) > (state.savedAt || 0)) {
+        state = normalize(remote);
+        processDayChange();
+        prevLevel = levelFromXp(state.totalXp);
+        localStorage.setItem(KEY, JSON.stringify(state));
+        render();
+      }
+    }
+    setSyncStatus("ok"); syncLast = Date.now();
+  } catch { setSyncStatus("error"); }
+}
+function syncPushSoon() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncPushNow, SYNC_DEBOUNCE);
+}
+async function syncPushNow() {
+  if (!syncCfg || !syncCfg.gistId) return;
+  try {
+    setSyncStatus("syncing");
+    const res = await ghFetch("/gists/" + syncCfg.gistId, { method: "PATCH", body: JSON.stringify({
+      files: { "life-rpg.json": { content: JSON.stringify(state) } } }) });
+    if (!res.ok) throw new Error();
+    setSyncStatus("ok"); syncLast = Date.now();
+  } catch { setSyncStatus("error"); }
+}
 
 const scheduledOn = (t, wd) => !t.oneshot && (t.days === null || t.days.includes(wd));
 const routineComplete = (r) => r.items.length > 0 && r.items.every((i) => r.done[i.id]);
@@ -598,6 +696,7 @@ function render() {
         <div class="lvl-title">${TITLES[lvl-1]}</div>
       </div>
       <div class="hdr-actions">
+        <span id="sync-dot" style="align-self:center;width:16px;text-align:center;font-size:14px"></span>
         <button id="btn-night" title="Check du soir">🌙</button>
         <button id="btn-pause" title="Mode vie réelle" style="${state.pause.active?"border-color:var(--acc);color:var(--acc)":""}">⏸</button>
       </div>
@@ -607,6 +706,7 @@ function render() {
     ${gate ? `<div class="gate-lock">🔒 PALIER ${gate.lvl} VERROUILLÉ — ${gateMissing(gate)}</div>` : ""}
     ${state.pause.active ? `<div class="pause-banner">⏸ MODE VIE RÉELLE — pénalités gelées (${state.pause.reason})<button id="btn-resume">REPRENDRE</button></div>` : ""}`;
   $("#btn-night").addEventListener("click", openNightCheck);
+  setSyncStatus(syncStatus);
   $("#btn-pause").addEventListener("click", () => state.pause.active ? resumePause() : openPauseModal());
   $("#btn-resume")?.addEventListener("click", resumePause);
 
@@ -947,6 +1047,22 @@ function render() {
           ${e.xp ? `<div class="logxp" style="color:${e.xp>0?"var(--green)":"var(--red)"}">${e.xp>0?"+":""}${fmt(e.xp)}</div>` : ""}</div>`).join("")}
       </div>
       <div class="card">
+        <div class="card-head"><div class="card-tag" style="background:var(--blue)"></div><span class="card-title">☁ Sauvegarde en ligne</span></div>
+        ${syncCfg && syncCfg.gistId ? `
+          <div style="font-size:13.5px;color:var(--green);margin-bottom:8px">✓ Connectée à ton compte GitHub${syncLast ? ` · dernière sync ${new Date(syncLast).toLocaleTimeString("fr-BE",{hour:"2-digit",minute:"2-digit"})}` : ""}</div>
+          <div class="hint" style="margin:0 0 10px">Ta progression est sauvegardée automatiquement dans un Gist privé quelques secondes après chaque action, et récupérée à l'ouverture sur tous tes appareils connectés avec le même token.</div>
+          <div class="row" style="margin-top:0">
+            <button class="btn btn-ghost" id="btn-sync-now" style="flex:1">⟳ Forcer la sync</button>
+            <button class="btn btn-ghost" id="btn-sync-off" style="flex:1;color:var(--red)">Déconnecter</button>
+          </div>`
+        : `
+          <div class="hint" style="margin:0 0 10px">Sauvegarde automatique + même progression sur tous tes appareils, via un Gist GitHub <b style="color:var(--text)">privé</b>. Colle un token GitHub (classique, scope « gist » uniquement) — voir GUIDE-SYNC.md.</div>
+          <div class="quickadd">
+            <input id="sync-token" type="password" placeholder="ghp_… (token GitHub)" autocomplete="off" />
+            <button class="mini-btn" id="btn-sync-connect" style="width:auto;padding:0 14px;color:var(--acc);border-color:var(--acc);font-family:'Rajdhani';font-weight:700;letter-spacing:1px">CONNECTER</button>
+          </div>`}
+      </div>
+      <div class="card">
         <div class="card-head"><div class="card-tag" style="background:var(--steel)"></div><span class="card-title">Données</span></div>
         <div class="row" style="margin-top:0">
           <button class="btn btn-ghost" id="btn-export" style="flex:1">⬇ Exporter (.json)</button>
@@ -955,6 +1071,7 @@ function render() {
         <div class="hint">Sauvegarde complète. Transfert PC → téléphone, ou avant de vider le cache.</div>
         <div style="text-align:center;margin-top:14px">
           <button id="btn-reset" style="background:none;border:none;color:var(--faint);font-size:11.5px;text-decoration:underline;cursor:pointer;letter-spacing:.5px">Réinitialiser l'application</button>
+          <div style="color:var(--faint);font-size:11px;margin-top:8px;letter-spacing:1px">LIFE RPG v${APP_VERSION}</div>
         </div>
       </div>`;
     main.querySelectorAll("[data-range]").forEach((c) => c.addEventListener("click", () => { chartRange = Number(c.dataset.range); render(); }));
@@ -982,6 +1099,12 @@ function render() {
     $("#btn-export").addEventListener("click", exportData);
     $("#btn-import").addEventListener("click", () => $("#import-file").click());
     $("#btn-reset").addEventListener("click", openResetModal);
+    $("#btn-sync-connect")?.addEventListener("click", () => {
+      const tk = $("#sync-token").value.trim();
+      if (tk) syncConnect(tk);
+    });
+    $("#btn-sync-now")?.addEventListener("click", async () => { await syncPushNow(); await syncPull(false); render(); });
+    $("#btn-sync-off")?.addEventListener("click", () => confirmDialog("Déconnecter la sauvegarde en ligne ? (ta progression locale est conservée, le Gist n'est pas supprimé)", syncDisconnect));
   }
 
   $("#nav").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { tab = b.dataset.tab; render(); }));
@@ -1065,8 +1188,10 @@ $("#import-file").addEventListener("change", (e) => { if (e.target.files[0]) imp
 
 /* ---------- BOOT ---------- */
 load();
+loadSyncCfg();
 processDayChange();
 prevLevel = levelFromXp(state.totalXp);
 render();
+if (syncCfg && syncCfg.gistId) syncPull(false);
 setInterval(() => { const b = state.lastDate; processDayChange(); if (state.lastDate !== b) render(); }, 60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { const b = state.lastDate; processDayChange(); if (state.lastDate !== b) render(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { const b = state.lastDate; processDayChange(); if (state.lastDate !== b) render(); if (syncCfg && syncCfg.gistId) syncPull(false); } });
