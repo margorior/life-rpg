@@ -526,7 +526,58 @@ function resumePause() {
   state.pause = { active: false, reason: "", since: null };
   save(); render();
 }
+/* Remise à zéro totale — validation renforcée : il faut taper RESET */
+function openResetModal() {
+  $("#modal").innerHTML = `<div class="modal-card">
+    <div class="modal-title" style="color:var(--red)">⚠ Remise à zéro totale <button class="x" id="modal-close">✕</button></div>
+    <div style="font-size:13.5px;line-height:1.6;color:var(--muted)">
+      Efface <b style="color:var(--text)">définitivement</b> toute ta progression : XP, niveaux, streak, quêtes,
+      routines, listes, objectifs, compteurs, historique et journal. L'app repart au niveau 1, Zombie du Canapé.<br><br>
+      Pense à <b style="color:var(--text)">exporter d'abord</b> si tu veux garder une trace.<br><br>
+      Pour confirmer, tape <b style="color:var(--red)">RESET</b> :</div>
+    <input id="reset-word" autocomplete="off" placeholder="Tape RESET" style="width:100%;background:#0C0E11;border:1px solid var(--line);color:var(--text);font-size:15px;padding:11px 12px;outline:none;margin-top:10px;letter-spacing:2px" />
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="reset-no" style="flex:1">Annuler</button>
+      <button class="btn" id="reset-yes" disabled style="flex:1;background:var(--panel2);color:var(--faint);border:1px solid var(--line)">Tout effacer</button>
+    </div></div>`;
+  $("#modal").classList.add("show");
+  $("#modal-close").addEventListener("click", closeModal);
+  $("#reset-no").addEventListener("click", closeModal);
+  const word = $("#reset-word"), yes = $("#reset-yes");
+  word.addEventListener("input", () => {
+    const ok = word.value.trim().toUpperCase() === "RESET";
+    yes.disabled = !ok;
+    yes.style.background = ok ? "var(--red)" : "var(--panel2)";
+    yes.style.color = ok ? "#fff" : "var(--faint)";
+    yes.style.border = ok ? "none" : "1px solid var(--line)";
+  });
+  yes.addEventListener("click", () => {
+    if (word.value.trim().toUpperCase() !== "RESET") return;
+    localStorage.removeItem(KEY);
+    state = defaultState();
+    save();
+    prevLevel = 1;
+    tab = "quests"; editMode = false; showAdd = false;
+    closeModal(); render();
+  });
+}
+
 function closeModal() { $("#modal").classList.remove("show"); $("#modal").innerHTML = ""; }
+
+/* Confirmation avant toute suppression */
+function confirmDialog(text, onYes) {
+  $("#modal").innerHTML = `<div class="modal-card">
+    <div class="modal-title">⚠ Confirmer <button class="x" id="modal-close">✕</button></div>
+    <div style="font-size:14px;line-height:1.5;margin:4px 0 2px">${text}</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="confirm-no" style="flex:1">Annuler</button>
+      <button class="btn" id="confirm-yes" style="flex:1;background:var(--red);color:#fff">Supprimer</button>
+    </div></div>`;
+  $("#modal").classList.add("show");
+  $("#modal-close").addEventListener("click", closeModal);
+  $("#confirm-no").addEventListener("click", closeModal);
+  $("#confirm-yes").addEventListener("click", () => { closeModal(); onYes(); });
+}
 
 /* ---------- RENDER ---------- */
 function render() {
@@ -670,8 +721,11 @@ function render() {
       e.stopPropagation();
       const [rk, iid] = b.dataset.rdel.split(":");
       const r = state.routines[rk];
-      r.items = r.items.filter((i) => i.id !== iid); delete r.done[iid];
-      save(); render();
+      const item = r.items.find((i) => i.id === iid);
+      confirmDialog(`Supprimer l'étape « ${item ? item.name : ""} » de la ${r.label.toLowerCase()} ?`, () => {
+        r.items = r.items.filter((i) => i.id !== iid); delete r.done[iid];
+        save(); render();
+      });
     }));
     main.querySelectorAll("[data-redit]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); editingRoutineItem = b.dataset.redit; render();
@@ -783,7 +837,11 @@ function render() {
       save(); render();
     }));
     main.querySelectorAll("[data-bldel]").forEach((b) => b.addEventListener("click", (e) => {
-      e.stopPropagation(); state.backlog = state.backlog.filter((x) => x.id !== b.dataset.bldel); save(); render();
+      e.stopPropagation();
+      const item = state.backlog.find((x) => x.id === b.dataset.bldel);
+      confirmDialog(`Supprimer « ${item ? item.name : ""} » de la liste ?`, () => {
+        state.backlog = state.backlog.filter((x) => x.id !== b.dataset.bldel); save(); render();
+      });
     }));
     main.querySelectorAll("[data-bledit]").forEach((el) => el.addEventListener("click", (e) => {
       if (e.target.closest("[data-blact],[data-blpause],[data-bldel]")) return;
@@ -812,7 +870,10 @@ function render() {
       save(); render();
     }));
     main.querySelectorAll("[data-gdel]").forEach((b) => b.addEventListener("click", () => {
-      state.goals = state.goals.filter((x) => x.id !== b.dataset.gdel); save(); render();
+      const g = state.goals.find((x) => x.id === b.dataset.gdel);
+      confirmDialog(`Abandonner l'objectif « ${g ? g.name : ""} » ?`, () => {
+        state.goals = state.goals.filter((x) => x.id !== b.dataset.gdel); save(); render();
+      });
     }));
   }
 
@@ -892,6 +953,9 @@ function render() {
           <button class="btn btn-ghost" id="btn-import" style="flex:1">⬆ Importer</button>
         </div>
         <div class="hint">Sauvegarde complète. Transfert PC → téléphone, ou avant de vider le cache.</div>
+        <div style="text-align:center;margin-top:14px">
+          <button id="btn-reset" style="background:none;border:none;color:var(--faint);font-size:11.5px;text-decoration:underline;cursor:pointer;letter-spacing:.5px">Réinitialiser l'application</button>
+        </div>
       </div>`;
     main.querySelectorAll("[data-range]").forEach((c) => c.addEventListener("click", () => { chartRange = Number(c.dataset.range); render(); }));
     const addCnt = () => {
@@ -903,15 +967,21 @@ function render() {
     $("#cnt-name").addEventListener("keydown", (e) => { if (e.key === "Enter") addCnt(); });
     main.querySelectorAll("[data-creset]").forEach((b) => b.addEventListener("click", () => {
       const c = state.counters.find((x) => x.id === b.dataset.creset);
-      state.log.unshift({ ts: Date.now(), text: `↺ ${c.name} : remise à zéro après ${daysBetweenStr(c.since, todayStr())}j`, xp: 0 });
-      c.since = todayStr(); c.milestones = [];
-      save(); render();
+      confirmDialog(`Remettre « ${c.name} » à zéro (${daysBetweenStr(c.since, todayStr())} jours) ?`, () => {
+        state.log.unshift({ ts: Date.now(), text: `↺ ${c.name} : remise à zéro après ${daysBetweenStr(c.since, todayStr())}j`, xp: 0 });
+        c.since = todayStr(); c.milestones = [];
+        save(); render();
+      });
     }));
     main.querySelectorAll("[data-cdel]").forEach((b) => b.addEventListener("click", () => {
-      state.counters = state.counters.filter((x) => x.id !== b.dataset.cdel); save(); render();
+      const c = state.counters.find((x) => x.id === b.dataset.cdel);
+      confirmDialog(`Supprimer le compteur « ${c ? c.name : ""} » ?`, () => {
+        state.counters = state.counters.filter((x) => x.id !== b.dataset.cdel); save(); render();
+      });
     }));
     $("#btn-export").addEventListener("click", exportData);
     $("#btn-import").addEventListener("click", () => $("#import-file").click());
+    $("#btn-reset").addEventListener("click", openResetModal);
   }
 
   $("#nav").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { tab = b.dataset.tab; render(); }));
@@ -951,7 +1021,11 @@ function bindQuests() {
     });
   });
   document.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", (e) => {
-    e.stopPropagation(); state.tasks = state.tasks.filter((t) => t.id !== b.dataset.del); save(); render();
+    e.stopPropagation();
+    const t = state.tasks.find((x) => x.id === b.dataset.del);
+    confirmDialog(`Supprimer la quête « ${t ? t.name : ""} » ?`, () => {
+      state.tasks = state.tasks.filter((x) => x.id !== b.dataset.del); save(); render();
+    });
   }));
   $("#btn-add")?.addEventListener("click", () => { showAdd = !showAdd; if (!showAdd) editingTaskId = null; render(); });
   $("#btn-edit")?.addEventListener("click", () => { editMode = !editMode; if (!editMode) { editingTaskId = null; showAdd = false; } render(); });

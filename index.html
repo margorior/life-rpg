@@ -193,6 +193,16 @@
   .quickadd input { flex: 1; background: #0C0E11; border: 1px solid var(--line); color: var(--text); font-size: 14px; padding: 10px 12px; outline: none; }
   .quickadd select { background: #0C0E11; border: 1px solid var(--line); color: var(--text); font-size: 13px; padding: 10px 8px; outline: none; max-width: 130px; }
 
+
+  .quickadd { flex-wrap: wrap; }
+  .quickadd > * { min-width: 0; }
+  .quickadd input { flex: 1 1 150px; }
+  .quickadd select { flex: 0 1 auto; max-width: 118px; }
+  .quickadd .mini-btn, .quickadd button { flex: 0 0 40px; }
+  .row > * { min-width: 0; }
+  .row select { max-width: 140px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 14px; }
+
 </style>
 </head>
 <body>
