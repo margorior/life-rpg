@@ -7,19 +7,19 @@
 
 /* ---------- NIVEAUX (50) ---------- */
 const TITLES = [
-  "Zombie du Canapé","Limace Horizontale","Larve en Éveil","Créature du Matin Difficile",
-  "Humain Fonctionnel","Bipède Motivé","Apprenti du Quotidien","Recrue de la Routine",
-  "Soldat de la Discipline","Éclaireur d'Objectifs","Artisan du Momentum","Combattant du Lundi",
-  "Chasseur de Quêtes","Guerrier du Matin","Vétéran des Habitudes","Stratège de la Vie",
-  "Capitaine Momentum","Chevalier des Neuf Fronts","Templier de la To-Do","Maître des Habitudes",
-  "Champion du Quotidien","Gladiateur de l'Aube","Conquérant des Objectifs","Baron de la Discipline",
-  "Héros du Quotidien","Duc du Dépassement","Seigneur des Routines","Paladin de la Constance",
-  "Sentinelle Inarrêtable","Titan de la Discipline","Colosse du Momentum","Prince de la Progression",
-  "Roi du Game","Archimage des Habitudes","Grand Maître de la Vie","Légende Vivante",
-  "Mythe Ambulant","Empereur du Game","Avatar de la Volonté","Force de la Nature",
-  "Semi-Légende Cosmique","Demi-Dieu du Quotidien","Gardien de l'Olympe","Immortel de la Routine",
-  "Dieu de la Vie","Dieu Suprême du Momentum","Entité Transcendante","Maître de l'Univers",
-  "Légende Absolue","Transcendant Ultime",
+  "Zombie du Canapé","Roi du Snooze","PNJ en Éveil","Survivant du Lundi",
+  "Humain Fonctionnel","Rookie Motivé","Apprenti du Grind","Recrue de la Routine",
+  "Soldat du Quotidien","Grinder Confirmé","Artisan du Momentum","Warrior du Lundi",
+  "Chasseur d'Objectifs","Lève-Tôt Certifié","Vétéran du Grind","Stratège du Quotidien",
+  "Capitaine Momentum","Maître des Neuf Fronts","Machine à Habitudes","Champion du Daily",
+  "Élite du Quotidien","Gladiateur de l'Aube","Conquérant du Planning","Baron de la Discipline",
+  "Héros du Quotidien","Serial Achiever","Boss des Routines","Mental d'Acier",
+  "Sentinelle Inarrêtable","Titan de la Discipline","Colosse du Momentum","Prince du Grind",
+  "Roi du Game","Architecte de sa Vie","Grand Maître du Game","Légende Vivante",
+  "Mythe Ambulant","Empereur du Game","Machine de Guerre","Force de la Nature",
+  "Hors Catégorie","Main Character","Phénomène","Immortel du Daily",
+  "GOAT de la Vie","Boss Final","Entité Transcendante","Maître de l'Univers",
+  "Légende Absolue","L'Apex",
 ];
 const MAX_LEVEL = TITLES.length;
 const thr = (l) => Math.round(2.5 * Math.pow(l - 1, 1.9));
@@ -155,7 +155,7 @@ const load = () => { try { const raw = localStorage.getItem(KEY); state = normal
 const save = () => { state.savedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(state)); if (syncCfg && syncCfg.gistId) syncPushSoon(); };
 
 /* ---------- SYNC GITHUB (Gist privé) ---------- */
-const APP_VERSION = "5.2.0";
+const APP_VERSION = "5.3.1";
 const SYNC_KEY = "life-rpg-sync";
 const SYNC_DEBOUNCE = (typeof window !== "undefined" && window.__SYNC_DEBOUNCE) || 2500;
 let syncCfg = null, syncStatus = "off", syncTimer = null, syncLast = null;
@@ -751,7 +751,8 @@ function render() {
             <div class="check" style="border-color:${CATS[b.cat].color}"></div>
             <div style="flex:1"><div class="name">${b.name}</div>
             <div class="meta">${CATS[b.cat].icon} ${CATS[b.cat].label} · actif depuis ${days}j${days >= 1 ? ` · <span style="color:var(--red)">−${fmt(b.xp*0.2)}/j</span>` : ""}</div></div>
-            <div class="xp-badge">+${fmt(b.xp)}</div></div>`;
+            <div class="xp-badge">+${fmt(b.xp)}</div>
+            <button class="mini-btn" data-bpause-q="${b.id}" title="Mettre en pause" style="color:var(--acc)">⏸</button></div>`;
         }).join("")}</div>` : ""}
       <div class="card">
         <div class="card-head"><div class="card-tag"></div><span class="card-title">Quêtes du jour</span><span class="count ${done===todays.length&&todays.length?"ok":""}">${done}/${todays.length}</span></div>
@@ -768,7 +769,13 @@ function render() {
         <button class="btn btn-ghost" id="btn-edit">${editMode?"Terminé":"Modifier"}</button></div>
       ${showAdd ? renderAddForm() : ""}`;
     bindQuests();
-    main.querySelectorAll("[data-bdone]").forEach((el) => el.addEventListener("click", () => completeBacklog(el.dataset.bdone)));
+    main.querySelectorAll("[data-bdone]").forEach((el) => el.addEventListener("click", (e) => { if (e.target.closest("[data-bpause-q]")) return; completeBacklog(el.dataset.bdone); }));
+    main.querySelectorAll("[data-bpause-q]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const item = state.backlog.find((x) => x.id === b.dataset.bpauseQ);
+      item.status = "paused"; item.activatedOn = null;
+      save(); render();
+    }));
   }
 
   /* ===== ROUTINES ===== */
@@ -858,41 +865,30 @@ function render() {
 
   /* ===== LISTES (backlog + objectifs) ===== */
   if (tab === "lists") {
-    const statusChip = (b) => b.status === "active"
-      ? `<span class="status-chip" style="color:var(--green);border-color:var(--green)">ACTIF</span>`
-      : b.status === "paused"
-      ? `<span class="status-chip" style="color:var(--acc);border-color:var(--acc)">⏸ PAUSE</span>`
-      : `<span class="status-chip" style="color:var(--faint);border-color:var(--line)">EN ATTENTE</span>`;
+    const active = state.backlog.filter((b) => b.status === "active");
+    const pool = state.backlog.filter((b) => b.status !== "active");
     const byCat = {};
-    state.backlog.forEach((b) => { (byCat[b.cat] = byCat[b.cat] || []).push(b); });
+    pool.forEach((b) => { (byCat[b.cat] = byCat[b.cat] || []).push(b); });
     main.innerHTML = `
+      ${active.length ? `<div class="card" style="border-color:rgba(242,163,60,.45)">
+        <div class="card-head"><div class="card-tag"></div><span class="card-title">🔥 En cours</span><span class="count">${active.length}</span></div>
+        ${active.map((b) => {
+          const days = b.activatedOn ? daysBetweenStr(b.activatedOn, todayStr()) : 0;
+          return `<div class="task">
+            <div style="flex:1;min-width:0"><div class="name" style="font-size:14px">${b.name}</div>
+            <div class="meta">${CATS[b.cat].icon} ${CATS[b.cat].label} · ${days}j${days >= 1 ? ` · <span style="color:var(--red)">−${fmt(b.xp*0.2)}/j</span>` : " · pénalité dès demain"}</div></div>
+            <button class="mini-btn" data-bldone="${b.id}" style="width:auto;padding:0 12px;color:var(--green);border-color:var(--green);font-family:'Rajdhani';font-weight:700;letter-spacing:1px">✓ FAIT +${fmt(b.xp)}</button>
+            <button class="mini-btn" data-blpause="${b.id}" title="Pause (bloqué, pas de ma faute)" style="color:var(--acc)">⏸</button>
+          </div>`;
+        }).join("")}</div>` : ""}
       <div class="card">
-        <div class="card-head"><div class="card-tag"></div><span class="card-title">🎯 Objectifs</span></div>
-        ${state.goals.length ? state.goals.map((g) => `
-          <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-              <span style="flex:1;font-size:14px">${CATS[g.cat].icon} ${g.name}</span>
-              <button class="mini-btn" data-gminus="${g.id}">−</button>
-              <span class="rj" style="width:44px;text-align:center;font-weight:700;color:var(--acc2)">${g.progress}%</span>
-              <button class="mini-btn" data-gplus="${g.id}">+</button>
-              ${g.progress >= 100 ? `<button class="mini-btn" data-gdone="${g.id}" style="color:var(--green);border-color:var(--green)">✓</button>` : `<button class="btn-del" data-gdel="${g.id}" style="margin-left:0">✕</button>`}
-            </div>
-            <div class="goal-bar"><div style="width:${g.progress}%"></div></div>
-          </div>`).join("") : `<div style="color:var(--muted);font-size:13px;margin-bottom:8px">Optionnel. Ajoute un objectif seulement si tu en as un (ex: « Gros œuvre terminé »). Terminé = +5 XP.</div>`}
-        <div class="quickadd" style="margin-top:10px">
-          <input id="goal-name" placeholder="+ Nouvel objectif (optionnel)" />
-          <select id="goal-cat">${Object.entries(CATS).map(([k,c])=>`<option value="${k}">${c.icon} ${c.label}</option>`).join("")}</select>
-          <button class="mini-btn" id="goal-add" style="width:40px;height:40px;color:var(--acc);border-color:var(--acc)">＋</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><div class="card-tag" style="background:var(--cyan)"></div><span class="card-title">📋 Listes par catégorie</span></div>
-        <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Vide ta tête ici (1 XP par défaut, tap pour modifier). <b style="color:var(--text)">Activer</b> = passe dans tes quêtes du jour ; laissé traîner = <b style="color:var(--red)">−20% de son XP/jour</b> dès le lendemain. ⏸ = gelé sans pénalité.</div>
+        <div class="card-head"><div class="card-tag" style="background:var(--cyan)"></div><span class="card-title">📋 Ajouter à une liste</span></div>
         <div class="quickadd">
-          <input id="bl-name" placeholder="+ Ajouter (ex: Appeler le notaire)" />
+          <input id="bl-name" placeholder="+ Ex: Appeler le notaire (Entrée pour ajouter)" />
           <select id="bl-cat">${Object.entries(CATS).map(([k,c])=>`<option value="${k}">${c.icon} ${c.label}</option>`).join("")}</select>
           <button class="mini-btn" id="bl-add" style="width:40px;height:40px;color:var(--acc);border-color:var(--acc)">＋</button>
         </div>
+        <div class="hint">1 XP par défaut (✎ pour changer). <b style="color:var(--text)">▶ GO</b> = ça passe dans tes quêtes du jour ; laissé traîner = −20% de son XP/jour dès le lendemain. ⏸ = gelé sans pénalité.</div>
       </div>
       ${Object.entries(byCat).map(([k, items]) => `
         <div class="card">
@@ -903,19 +899,39 @@ function render() {
               <select id="bl-edit-xp" style="width:84px;background:#0C0E11;border:1px solid var(--line);color:var(--text);padding:9px 6px;font-size:13px">${[0.5,1,1.5,2,3,5].map((v)=>`<option value="${v}" ${b.xp==v?"selected":""}>${fmt(v)} XP</option>`).join("")}</select>
               <button class="mini-btn" data-blsave="${b.id}" style="color:var(--green);border-color:var(--green)">✓</button>
             </div>` : `
-            <div class="task" data-bledit="${b.id}" style="cursor:pointer">
-              <div style="flex:1;min-width:0"><div class="name" style="font-size:14px">${b.name}</div>
-              <div class="meta">${statusChip(b)} · ${fmt(b.xp)} XP${b.status==="active"&&b.activatedOn?` · depuis ${daysBetweenStr(b.activatedOn, todayStr())}j`:""}</div></div>
-              ${b.status !== "active" ? `<button class="mini-btn" data-blact="${b.id}" style="color:var(--green);border-color:var(--green)" title="Activer">▶</button>` : ""}
-              ${b.status === "active" ? `<button class="mini-btn" data-blpause="${b.id}" style="color:var(--acc)" title="Pause">⏸</button>` : ""}
-              ${b.status === "paused" ? "" : ""}
+            <div class="task">
+              <div style="flex:1;min-width:0"><div class="name" style="font-size:14px;${b.status==="paused"?"opacity:.6":""}">${b.name}</div>
+              <div class="meta">${b.status === "paused" ? `<span class="status-chip" style="color:var(--acc);border-color:var(--acc)">⏸ EN PAUSE</span> · ` : ""}${fmt(b.xp)} XP</div></div>
+              <button class="mini-btn" data-blact="${b.id}" style="width:auto;padding:0 12px;color:var(--green);border-color:var(--green);font-family:'Rajdhani';font-weight:700;letter-spacing:1px">▶ GO</button>
+              <button class="mini-btn" data-bledit="${b.id}" style="color:var(--acc)">✎</button>
               <button class="btn-del" data-bldel="${b.id}" style="margin-left:0">✕</button>
             </div>`).join("")}
-        </div>`).join("")}`;
+        </div>`).join("")}
+      ${pool.length === 0 && active.length === 0 ? `<div class="hint" style="text-align:center;padding:8px 0">Tes listes sont vides. Vide ta tête ci-dessus : tout ce que tu dois faire un jour, sans pression tant que ce n'est pas activé.</div>` : ""}
+      <div class="card">
+        <div class="card-head"><div class="card-tag"></div><span class="card-title">🎯 Objectifs long terme</span></div>
+        ${state.goals.length ? state.goals.map((g) => `
+          <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span style="flex:1;font-size:14px">${CATS[g.cat].icon} ${g.name}</span>
+              <button class="mini-btn" data-gminus="${g.id}">−</button>
+              <span class="rj" style="width:44px;text-align:center;font-weight:700;color:var(--acc2)">${g.progress}%</span>
+              <button class="mini-btn" data-gplus="${g.id}">+</button>
+              ${g.progress >= 100 ? `<button class="mini-btn" data-gdone="${g.id}" style="color:var(--green);border-color:var(--green)">✓</button>` : `<button class="btn-del" data-gdel="${g.id}" style="margin-left:0">✕</button>`}
+            </div>
+            <div class="goal-bar"><div style="width:${g.progress}%"></div></div>
+          </div>`).join("") : `<div style="color:var(--muted);font-size:13px;margin-bottom:8px">Optionnel — seulement si tu en as un (ex: « Gros œuvre terminé »). Terminé = +5 XP.</div>`}
+        <div class="quickadd" style="margin-top:10px">
+          <input id="goal-name" placeholder="+ Nouvel objectif (optionnel)" />
+          <select id="goal-cat">${Object.entries(CATS).map(([k,c])=>`<option value="${k}">${c.icon} ${c.label}</option>`).join("")}</select>
+          <button class="mini-btn" id="goal-add" style="width:40px;height:40px;color:var(--acc);border-color:var(--acc)">＋</button>
+        </div>
+      </div>`;
     const addBl = () => {
       const name = $("#bl-name").value.trim(); if (!name) return;
       state.backlog.push({ id: "bl" + Date.now(), name, cat: $("#bl-cat").value, xp: 1, status: "wait", activatedOn: null });
       save(); render();
+      $("#bl-name")?.focus();
     };
     $("#bl-add").addEventListener("click", addBl);
     $("#bl-name").addEventListener("keydown", (e) => { if (e.key === "Enter") addBl(); });
@@ -924,29 +940,24 @@ function render() {
       state.goals.push({ id: "g" + Date.now(), name, cat: $("#goal-cat").value, progress: 0 });
       save(); render();
     });
-    main.querySelectorAll("[data-blact]").forEach((b) => b.addEventListener("click", (e) => {
-      e.stopPropagation();
+    main.querySelectorAll("[data-bldone]").forEach((b) => b.addEventListener("click", () => completeBacklog(b.dataset.bldone)));
+    main.querySelectorAll("[data-blact]").forEach((b) => b.addEventListener("click", () => {
       const item = state.backlog.find((x) => x.id === b.dataset.blact);
       item.status = "active"; item.activatedOn = todayStr();
       save(); render();
     }));
-    main.querySelectorAll("[data-blpause]").forEach((b) => b.addEventListener("click", (e) => {
-      e.stopPropagation();
+    main.querySelectorAll("[data-blpause]").forEach((b) => b.addEventListener("click", () => {
       const item = state.backlog.find((x) => x.id === b.dataset.blpause);
       item.status = "paused"; item.activatedOn = null;
       save(); render();
     }));
-    main.querySelectorAll("[data-bldel]").forEach((b) => b.addEventListener("click", (e) => {
-      e.stopPropagation();
+    main.querySelectorAll("[data-bldel]").forEach((b) => b.addEventListener("click", () => {
       const item = state.backlog.find((x) => x.id === b.dataset.bldel);
       confirmDialog(`Supprimer « ${item ? item.name : ""} » de la liste ?`, () => {
         state.backlog = state.backlog.filter((x) => x.id !== b.dataset.bldel); save(); render();
       });
     }));
-    main.querySelectorAll("[data-bledit]").forEach((el) => el.addEventListener("click", (e) => {
-      if (e.target.closest("[data-blact],[data-blpause],[data-bldel]")) return;
-      backlogEdit = el.dataset.bledit; render();
-    }));
+    main.querySelectorAll("[data-bledit]").forEach((b) => b.addEventListener("click", () => { backlogEdit = b.dataset.bledit; render(); }));
     main.querySelectorAll("[data-blsave]").forEach((b) => b.addEventListener("click", () => {
       const item = state.backlog.find((x) => x.id === b.dataset.blsave);
       const nm = $("#bl-edit-name").value.trim();
